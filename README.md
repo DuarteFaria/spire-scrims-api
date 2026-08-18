@@ -4,12 +4,42 @@ A small REST API for managing scrims, lobbies, and lobby players. It includes
 interactive Swagger docs so you can inspect the endpoints and try requests from
 your browser.
 
+## Configuration
+
+Both `scripts/serve_docs.py` and `scripts/test_create_scrim.py` use these
+environment variables:
+
+| Variable         | Purpose                                                             |
+| ---------------- | ------------------------------------------------------------------- |
+| `SCRIMS_API_URL` | Base URL of the Scrims API that receives proxied `/api/*` requests. |
+| `SCRIMS_API_KEY` | API key added to proxied requests as a bearer token.                |
+
+Copy the example file and fill in both values:
+
+```bash
+cp scripts/.env.example scripts/.env
+```
+
+```dotenv
+SCRIMS_API_URL=https://your-api.example.com
+SCRIMS_API_KEY=your-api-key
+```
+
+Both scripts load `scripts/.env` automatically. Variables already set in your
+shell take precedence over values in that file.
+
 ## Use the Swagger docs
 
 Start the docs server:
 
 ```bash
 python3 scripts/serve_docs.py
+```
+
+To use a different local port:
+
+```bash
+python3 scripts/serve_docs.py --port 9000
 ```
 
 Open [http://localhost:8000](http://localhost:8000), then:
@@ -31,20 +61,12 @@ Every API request needs a bearer token:
 Authorization: Bearer <api-key>
 ```
 
-The docs server reads `SCRIMS_API_KEY` from `scripts/.env` and adds the bearer
+The docs server reads `SCRIMS_API_KEY` from the environment and adds the bearer
 token to proxied requests. The key is not exposed to the browser.
 
 ## Run the production test
 
-Copy `scripts/.env.example` to `scripts/.env`, then add the production API URL
-and key:
-
-```text
-SCRIMS_API_URL=https://your-api.example.com
-SCRIMS_API_KEY=your-api-key
-```
-
-Then run:
+Using the same configuration, run:
 
 ```bash
 python3 scripts/test_create_scrim.py
