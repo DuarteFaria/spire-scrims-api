@@ -1,0 +1,648 @@
+openapi: 3.0.3
+info:
+  title: Spire Scrims REST API
+  version: 1.0.0
+  description: |
+    HTTP API for external tools to manage scrims, lobbies, and lobby players.
+
+    ## Authentication
+    Every request needs a bearer token: `Authorization: Bearer <api-key>`.
+    The API owner will provide your key. Missing or invalid key → `401`.
+    API temporarily unavailable → `503`.
+
+    ## Conventions
+    - Request/response bodies are JSON.
+    - IDs (`seasonId`, `scrimId`, `lobbyId`, `playerId`, ...) are opaque strings
+      returned by the lookup endpoints — fetch them from there, don't construct them.
+    - Errors return `{"error": "message"}` with status `400` (bad input / business
+      rule), `404` (not found), or `401`/`503` (auth).
+
+    ## Typical flow (see scripts/test_create_scrim.py)
+    1. `GET /api/seasons` — pick a season
+    2. `GET /api/point-systems`, `GET /api/map-lineups` — optional attachments
+    3. `POST /api/scrims` — create the scrim
+    4. `POST /api/lobbies` — one per lobby
+    5. `GET /api/players?search=...` — resolve player names to IDs
+    6. `POST /api/lobbies/{lobbyId}/players` — fill each lobby
+servers:
+  - url: /
+    description: Production API through the docs server
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Lookups
+    description: >
+      Read-only endpoints to resolve names to IDs (seasons, players, point
+      systems, map lineups) and to inspect existing scrims and lobbies.
+  - name: Scrims
+    description: Create and delete scrims.
+  - name: Lobbies
+    description: Create and delete lobbies, and manage each lobby's roster.
+
+paths:
+  /api/seasons:
+    get:
+      tags: [Lookups]
+      summary: List seasons
+      description: Returns all non-deleted seasons, newest first. Use the first entry as the "latest" season.
+      operationId: listSeasons
+      responses:
+        "200":
+          description: Seasons list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SeasonsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/players:
+    get:
+      tags: [Lookups]
+      summary: List / search players
+      description: Optionally filter with `search` (case-insensitive substring match on the player name).
+      operationId: listPlayers
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+          example: glitch
+          description: Case-insensitive substring to match against player names.
+      responses:
+        "200":
+          description: Matching players
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlayersResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/point-systems:
+    get:
+      tags: [Lookups]
+      summary: List point systems
+      description: Point systems that can be attached to a scrim at creation via `pointSystemId`.
+      operationId: listPointSystems
+      responses:
+        "200":
+          description: Point systems list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PointSystemsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/map-lineups:
+    get:
+      tags: [Lookups]
+      summary: List map lineups
+      description: Map lineups that can be attached to a scrim at creation via `mapLineupId`.
+      operationId: listMapLineups
+      responses:
+        "200":
+          description: Map lineups list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MapLineupsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/scrims:
+    get:
+      tags: [Lookups]
+      summary: List scrims
+      description: Newest first. Includes private scrims.
+      operationId: listScrims
+      parameters:
+        - name: seasonId
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter by season.
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, maximum: 200 }
+          description: Max results; caps at 200.
+      responses:
+        "200":
+          description: Scrims list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScrimsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+    post:
+      tags: [Scrims]
+      summary: Create a scrim
+      description: >
+        Creates a scrim in the given season. Attach a point system and/or map
+        lineup by ID (resolve them with the lookup endpoints first).
+      operationId: createScrim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateScrimRequest" }
+            example:
+              name: Weekly Ranked
+              type: Solos
+              seasonId: k57...
+              isPrivate: false
+              pointSystemId: m12...
+              mapLineupId: n34...
+      responses:
+        "201":
+          description: Scrim created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateScrimResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/scrims/{scrimId}:
+    get:
+      tags: [Lookups]
+      summary: Get a scrim
+      operationId: getScrim
+      parameters:
+        - $ref: "#/components/parameters/scrimId"
+      responses:
+        "200":
+          description: The scrim
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScrimResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+    delete:
+      tags: [Scrims]
+      summary: Delete a scrim
+      description: >
+        Deletes the scrim and everything under it (lobbies, lobby scores,
+        scrim players). Irreversible.
+      operationId: deleteScrim
+      parameters:
+        - $ref: "#/components/parameters/scrimId"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deleted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/scrims/{scrimId}/lobbies:
+    get:
+      tags: [Lookups]
+      summary: List a scrim's lobbies
+      description: Each lobby includes its number and current roster.
+      operationId: listScrimLobbies
+      parameters:
+        - $ref: "#/components/parameters/scrimId"
+      responses:
+        "200":
+          description: Lobbies with rosters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScrimLobbiesResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/lobbies:
+    post:
+      tags: [Lobbies]
+      summary: Create a lobby
+      description: >
+        Adds an empty lobby to a scrim. Lobby numbers auto-increment within
+        the scrim.
+      operationId: createLobby
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateLobbyRequest" }
+            example: { scrimId: "p88..." }
+      responses:
+        "201":
+          description: Lobby created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateLobbyResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/lobbies/{lobbyId}:
+    delete:
+      tags: [Lobbies]
+      summary: Delete a lobby
+      description: >
+        Deletes the lobby and its scores; remaining lobbies in the scrim are
+        renumbered.
+      operationId: deleteLobby
+      parameters:
+        - $ref: "#/components/parameters/lobbyId"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deleted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/lobbies/{lobbyId}/players:
+    post:
+      tags: [Lobbies]
+      summary: Add players to a lobby
+      description: >
+        Appends to the current roster; duplicates are ignored. Max 12 players
+        per lobby. Returns the full roster after the change.
+      operationId: addLobbyPlayers
+      parameters:
+        - $ref: "#/components/parameters/lobbyId"
+      requestBody: { $ref: "#/components/requestBodies/PlayerIds" }
+      responses:
+        "200": { $ref: "#/components/responses/Roster" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+    put:
+      tags: [Lobbies]
+      summary: Replace a lobby's players
+      description: >
+        Replaces the entire roster with the given players. Players removed
+        this way also lose any scores recorded in that lobby.
+      operationId: replaceLobbyPlayers
+      parameters:
+        - $ref: "#/components/parameters/lobbyId"
+      requestBody: { $ref: "#/components/requestBodies/PlayerIds" }
+      responses:
+        "200": { $ref: "#/components/responses/Roster" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Enter the API key provided to you. Swagger adds the `Bearer` prefix.
+
+  parameters:
+    scrimId:
+      name: scrimId
+      in: path
+      required: true
+      schema: { type: string }
+      description: Opaque scrim ID from `POST /api/scrims` or `GET /api/scrims`.
+    lobbyId:
+      name: lobbyId
+      in: path
+      required: true
+      schema: { type: string }
+      description: Opaque lobby ID from `POST /api/lobbies` or `GET /api/scrims/{scrimId}/lobbies`.
+
+  requestBodies:
+    PlayerIds:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/UpdateLobbyRosterRequest" }
+
+  responses:
+    Roster:
+      description: The lobby's full roster after the change
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/LobbyRosterResponse" }
+    BadRequest:
+      description: Bad input, invalid ID, missing resource, or business rule violation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    Unauthorized:
+      description: Missing or wrong API key
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    KeyNotConfigured:
+      description: API authentication is not configured on the deployment
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+
+  schemas:
+    ResourceId:
+      type: string
+      minLength: 1
+      description: Opaque ID returned by the API. Do not build IDs manually.
+      example: "k17abc123"
+
+    Timestamp:
+      type: number
+      format: double
+      description: Unix timestamp in milliseconds.
+      example: 1787068800000
+
+    GameType:
+      type: string
+      enum: [Solos, Duos, Trios]
+      description: Roster format used by the scrim.
+      example: Solos
+
+    NamedResource:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      description: A resource reduced to the fields needed for selection and display.
+      properties:
+        id: { $ref: "#/components/schemas/ResourceId" }
+        name:
+          type: string
+          minLength: 1
+          description: Display name.
+          example: Season 5
+
+    Scrim:
+      type: object
+      additionalProperties: false
+      required:
+        [id, name, type, isPrivate, seasonId, pointSystemId, mapLineupId, createdAt]
+      description: A scrim and its selected configuration.
+      properties:
+        id: { $ref: "#/components/schemas/ResourceId" }
+        name:
+          type: string
+          minLength: 1
+          example: Weekly Ranked
+        type: { $ref: "#/components/schemas/GameType" }
+        isPrivate:
+          type: boolean
+          description: Whether the scrim is hidden from public views.
+          example: false
+        seasonId:
+          type: string
+          nullable: true
+          description: Season containing the scrim.
+          example: "k57season"
+        pointSystemId:
+          type: string
+          nullable: true
+          description: Attached point system, or `null` when none is selected.
+          example: "m12points"
+        mapLineupId:
+          type: string
+          nullable: true
+          description: Attached map lineup, or `null` when none is selected.
+          example: "n34lineup"
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    LobbyDetails:
+      type: object
+      additionalProperties: false
+      required: [id, number, players, createdAt]
+      description: A lobby returned when listing a scrim's lobbies.
+      properties:
+        id: { $ref: "#/components/schemas/ResourceId" }
+        number:
+          type: integer
+          minimum: 1
+          description: 1-based position within the scrim.
+          example: 1
+        players:
+          type: array
+          maxItems: 12
+          description: Players currently assigned to the lobby.
+          items: { $ref: "#/components/schemas/NamedResource" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+      example:
+        id: "q42lobby"
+        number: 1
+        players:
+          - { id: "j97player", name: "1stGlitch" }
+          - { id: "j98player", name: "A penguin" }
+        createdAt: 1787068800000
+
+    CreatedLobby:
+      type: object
+      additionalProperties: false
+      required: [id, number, players]
+      description: A newly created empty lobby.
+      properties:
+        id: { $ref: "#/components/schemas/ResourceId" }
+        number:
+          type: integer
+          minimum: 1
+          description: 1-based position within the scrim.
+          example: 1
+        players:
+          type: array
+          maxItems: 12
+          description: Player IDs assigned to the lobby. New lobbies start empty.
+          items: { $ref: "#/components/schemas/ResourceId" }
+      example: { id: "q42lobby", number: 1, players: [] }
+
+    CreateScrimRequest:
+      type: object
+      additionalProperties: false
+      required: [name, type, seasonId]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Display name for the scrim.
+          example: Weekly Ranked
+        type: { $ref: "#/components/schemas/GameType" }
+        seasonId:
+          type: string
+          minLength: 1
+          description: ID from `GET /api/seasons`.
+          example: "k57season"
+        isPrivate:
+          type: boolean
+          default: false
+          description: Hide the scrim from public views.
+        pointSystemId:
+          type: string
+          minLength: 1
+          description: Optional ID from `GET /api/point-systems`.
+          example: "m12points"
+        mapLineupId:
+          type: string
+          minLength: 1
+          description: Optional ID from `GET /api/map-lineups`.
+          example: "n34lineup"
+
+    CreateLobbyRequest:
+      type: object
+      additionalProperties: false
+      required: [scrimId]
+      properties:
+        scrimId:
+          type: string
+          minLength: 1
+          description: ID of the scrim that will own the lobby.
+          example: "p88scrim"
+
+    UpdateLobbyRosterRequest:
+      type: object
+      additionalProperties: false
+      required: [playerIds]
+      properties:
+        playerIds:
+          type: array
+          maxItems: 12
+          description: Player IDs from `GET /api/players`.
+          items: { $ref: "#/components/schemas/ResourceId" }
+          example: ["j97player", "j98player"]
+
+    SeasonsResponse:
+      type: object
+      additionalProperties: false
+      required: [seasons]
+      properties:
+        seasons:
+          type: array
+          description: Non-deleted seasons, newest first.
+          items: { $ref: "#/components/schemas/NamedResource" }
+      example:
+        seasons: [{ id: "k57season", name: "Season 5" }]
+
+    PlayersResponse:
+      type: object
+      additionalProperties: false
+      required: [players]
+      properties:
+        players:
+          type: array
+          description: Players matching the optional search text.
+          items: { $ref: "#/components/schemas/NamedResource" }
+      example:
+        players: [{ id: "j97player", name: "1stGlitch" }]
+
+    PointSystemsResponse:
+      type: object
+      additionalProperties: false
+      required: [pointSystems]
+      properties:
+        pointSystems:
+          type: array
+          items: { $ref: "#/components/schemas/NamedResource" }
+      example:
+        pointSystems: [{ id: "m12points", name: "Points 4.0 (Newest)" }]
+
+    MapLineupsResponse:
+      type: object
+      additionalProperties: false
+      required: [mapLineups]
+      properties:
+        mapLineups:
+          type: array
+          items: { $ref: "#/components/schemas/NamedResource" }
+      example:
+        mapLineups:
+          - { id: "n34lineup", name: "FSD > SE > HSD > SR > DS > FSN" }
+
+    ScrimsResponse:
+      type: object
+      additionalProperties: false
+      required: [scrims]
+      properties:
+        scrims:
+          type: array
+          description: Scrims ordered from newest to oldest.
+          items: { $ref: "#/components/schemas/Scrim" }
+      example:
+        scrims:
+          - id: "p88scrim"
+            name: Weekly Ranked
+            type: Solos
+            isPrivate: false
+            seasonId: "k57season"
+            pointSystemId: "m12points"
+            mapLineupId: "n34lineup"
+            createdAt: 1787068800000
+
+    ScrimResponse:
+      type: object
+      additionalProperties: false
+      required: [scrim]
+      properties:
+        scrim: { $ref: "#/components/schemas/Scrim" }
+
+    ScrimLobbiesResponse:
+      type: object
+      additionalProperties: false
+      required: [lobbies]
+      properties:
+        lobbies:
+          type: array
+          description: Lobbies ordered by their number.
+          items: { $ref: "#/components/schemas/LobbyDetails" }
+
+    CreateScrimResponse:
+      type: object
+      additionalProperties: false
+      required: [scrimId]
+      properties:
+        scrimId:
+          type: string
+          description: ID of the newly created scrim.
+          example: "p88scrim"
+
+    CreateLobbyResponse:
+      type: object
+      additionalProperties: false
+      required: [lobby]
+      properties:
+        lobby: { $ref: "#/components/schemas/CreatedLobby" }
+
+    LobbyRosterResponse:
+      type: object
+      additionalProperties: false
+      required: [players]
+      properties:
+        players:
+          type: array
+          maxItems: 12
+          description: Full list of player IDs in the lobby after the change.
+          items: { $ref: "#/components/schemas/ResourceId" }
+          example: ["j97player", "j98player"]
+
+    Deleted:
+      type: object
+      additionalProperties: false
+      required: [deleted]
+      properties:
+        deleted:
+          type: boolean
+          description: Confirms that the operation completed.
+          example: true
+
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable explanation of the failure.
+          example: Scrim not found
