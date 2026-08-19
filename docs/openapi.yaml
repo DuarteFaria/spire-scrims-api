@@ -22,8 +22,10 @@ info:
     2. `GET /api/point-systems`, `GET /api/map-lineups` — optional attachments
     3. `POST /api/scrims` — create the scrim
     4. `POST /api/lobbies` — one per lobby
-    5. `GET /api/players?search=...` — resolve player names to IDs
-    6. `POST /api/lobbies/{lobbyId}/players` — fill each lobby
+    5. `GET /api/players?search=...` — resolve player names to IDs (or skip
+       this step and use Discord IDs directly in the next one)
+    6. `POST /api/lobbies/{lobbyId}/players` — fill each lobby, referencing
+       players by `playerIds` and/or `discordIds`
 servers:
   - url: /
     description: Production API through the docs server
@@ -381,6 +383,27 @@ components:
           description: Display name.
           example: Season 5
 
+    Player:
+      type: object
+      additionalProperties: false
+      required: [id, name, discordId]
+      description: A player with their linked Discord ID, if any.
+      properties:
+        id: { $ref: "#/components/schemas/ResourceId" }
+        name:
+          type: string
+          minLength: 1
+          description: Display name.
+          example: 1stGlitch
+        discordId:
+          type: string
+          nullable: true
+          description: >
+            Linked Discord user ID (snowflake), or `null` when the player has
+            no Discord ID on record. Usable in `discordIds` when updating a
+            lobby roster.
+          example: "123456789012345678"
+
     Scrim:
       type: object
       additionalProperties: false
@@ -431,14 +454,14 @@ components:
           type: array
           maxItems: 12
           description: Players currently assigned to the lobby.
-          items: { $ref: "#/components/schemas/NamedResource" }
+          items: { $ref: "#/components/schemas/Player" }
         createdAt: { $ref: "#/components/schemas/Timestamp" }
       example:
         id: "q42lobby"
         number: 1
         players:
-          - { id: "j97player", name: "1stGlitch" }
-          - { id: "j98player", name: "A penguin" }
+          - { id: "j97player", name: "1stGlitch", discordId: "123456789012345678" }
+          - { id: "j98player", name: "A penguin", discordId: null }
         createdAt: 1787068800000
 
     CreatedLobby:
@@ -505,7 +528,14 @@ components:
     UpdateLobbyRosterRequest:
       type: object
       additionalProperties: false
-      required: [playerIds]
+      description: >
+        Reference players by internal ID and/or Discord ID. At least one of
+        `playerIds` or `discordIds` must be present; when both are given the
+        lists are combined. Unknown IDs of either kind fail the whole request
+        with `400`.
+      anyOf:
+        - required: [playerIds]
+        - required: [discordIds]
       properties:
         playerIds:
           type: array
@@ -513,6 +543,15 @@ components:
           description: Player IDs from `GET /api/players`.
           items: { $ref: "#/components/schemas/ResourceId" }
           example: ["j97player", "j98player"]
+        discordIds:
+          type: array
+          maxItems: 12
+          description: >
+            Discord user IDs (snowflakes) of players. Only works for players
+            that have a Discord ID linked — check `discordId` on
+            `GET /api/players`.
+          items: { type: string, minLength: 1 }
+          example: ["123456789012345678"]
 
     SeasonsResponse:
       type: object
@@ -534,9 +573,10 @@ components:
         players:
           type: array
           description: Players matching the optional search text.
-          items: { $ref: "#/components/schemas/NamedResource" }
+          items: { $ref: "#/components/schemas/Player" }
       example:
-        players: [{ id: "j97player", name: "1stGlitch" }]
+        players:
+          - { id: "j97player", name: "1stGlitch", discordId: "123456789012345678" }
 
     PointSystemsResponse:
       type: object
