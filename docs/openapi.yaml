@@ -38,6 +38,8 @@ tags:
     description: >
       Read-only endpoints to resolve names to IDs (seasons, players, point
       systems, map lineups) and to inspect existing scrims and lobbies.
+  - name: Players
+    description: Create players.
   - name: Scrims
     description: Create and delete scrims.
   - name: Lobbies
@@ -78,6 +80,30 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PlayersResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+    post:
+      tags: [Players]
+      summary: Create a player
+      description: >
+        Creates a player, optionally linked to a Discord user ID. The name must
+        be unique, and so must the Discord ID when given.
+      operationId: createPlayer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePlayerRequest" }
+            example:
+              name: 1stGlitch
+              discordId: "123456789012345678"
+      responses:
+        "201":
+          description: Player created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreatePlayerResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { $ref: "#/components/responses/KeyNotConfigured" }
 
@@ -513,6 +539,33 @@ components:
           minLength: 1
           description: Optional ID from `GET /api/map-lineups`.
           example: "n34lineup"
+
+    CreatePlayerRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Display name. Must not match an existing player's name.
+          example: 1stGlitch
+        discordId:
+          type: string
+          minLength: 1
+          description: >
+            Optional Discord user ID (snowflake) to link. Must not already be
+            linked to another player.
+          example: "123456789012345678"
+
+    CreatePlayerResponse:
+      type: object
+      additionalProperties: false
+      required: [player]
+      properties:
+        player: { $ref: "#/components/schemas/Player" }
+      example:
+        player: { id: "j97player", name: "1stGlitch", discordId: "123456789012345678" }
 
     CreateLobbyRequest:
       type: object
