@@ -3,7 +3,7 @@ info:
   title: Spire Scrims REST API
   version: 1.0.0
   description: |
-    HTTP API for external tools to manage scrims, lobbies, and lobby players.
+    HTTP API for external tools to manage scrims, lobbies, lobby players, and lobby scores.
 
     ## Authentication
     Every request needs a bearer token: `Authorization: Bearer <api-key>`.
@@ -26,6 +26,15 @@ info:
        this step and use Discord IDs directly in the next one)
     6. `POST /api/lobbies/{lobbyId}/players` — fill each lobby, referencing
        players by `playerIds` and/or `discordIds`
+
+    ## Scoring a lobby
+    1. `GET /api/lobbies/{lobbyId}/map-lineup` — get each map's `id` and
+       `mapIndex` for the lobby's scrim
+    2. `GET /api/lobbies/{lobbyId}/players` — the players you can score
+    3. `PUT /api/lobbies/{lobbyId}/scores` — submit scores for one map
+       (`mapId` + `mapIndex`); repeat per map
+    4. `GET /api/lobbies/{lobbyId}/scores` — read back stored scores,
+       placement points and map winners
 servers:
   - url: /
     description: Production API through the docs server
@@ -44,6 +53,8 @@ tags:
     description: Create and delete scrims.
   - name: Lobbies
     description: Create and delete lobbies, and manage each lobby's roster.
+  - name: Scores
+    description: Read and submit per-map player scores for a lobby.
 
 paths:
   /api/seasons:
@@ -291,6 +302,23 @@ paths:
         "503": { $ref: "#/components/responses/KeyNotConfigured" }
 
   /api/lobbies/{lobbyId}/players:
+    get:
+      tags: [Lobbies]
+      summary: List a lobby's players
+      description: Players currently in the lobby, in roster order.
+      operationId: getLobbyPlayers
+      parameters:
+        - $ref: "#/components/parameters/lobbyId"
+      responses:
+        "200":
+          description: The lobby's players
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LobbyPlayersResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
     post:
       tags: [Lobbies]
       summary: Add players to a lobby
@@ -318,6 +346,103 @@ paths:
       requestBody: { $ref: "#/components/requestBodies/PlayerIds" }
       responses:
         "200": { $ref: "#/components/responses/Roster" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/lobbies/{lobbyId}/map-lineup:
+    get:
+      tags: [Scores]
+      summary: Get a lobby's map lineup
+      description: >
+        The map lineup attached to the lobby's scrim, with each map's
+        `mapIndex`. Use `id` + `mapIndex` when submitting or filtering scores.
+        `mapLineup` is `null` when the scrim has no lineup attached.
+      operationId: getLobbyMapLineup
+      parameters:
+        - $ref: "#/components/parameters/lobbyId"
+      responses:
+        "200":
+          description: The lobby's map lineup
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LobbyMapLineupResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/lobbies/{lobbyId}/scores:
+    get:
+      tags: [Scores]
+      summary: Get a lobby's scores
+      description: >
+        Stored player scores for the lobby, sorted by `mapIndex`. Pass both
+        `mapId` and `mapIndex` to get a single map; passing only one of them
+        returns `400`.
+      operationId: getLobbyScores
+      parameters:
+        - $ref: "#/components/parameters/lobbyId"
+        - name: mapId
+          in: query
+          required: false
+          schema: { type: string }
+          description: Map ID from `GET /api/lobbies/{lobbyId}/map-lineup`. Requires `mapIndex`.
+          example: "r11map"
+        - name: mapIndex
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+          description: 0-based position of the map in the lineup. Requires `mapId`.
+          example: 0
+      responses:
+        "200":
+          description: The lobby's scores
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LobbyScoresResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+    put:
+      tags: [Scores]
+      summary: Submit scores for one map
+      description: >
+        Upserts scores for one map (`mapId` + `mapIndex`) of the lobby. Only
+        the players you send are changed; other players' stored scores for
+        that map are kept. A player's `score` object is replaced as a whole,
+        not merged field by field.
+
+
+        After saving, placement points, EPP bonuses and the map winner are
+        recalculated for the whole map using the scrim's point system. Every
+        player must already be in the lobby; any invalid entry fails the whole
+        request with `400` and nothing is saved. Returns all scores for that
+        map after the update.
+      operationId: updateLobbyScores
+      parameters:
+        - $ref: "#/components/parameters/lobbyId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateLobbyScoresRequest" }
+            example:
+              mapId: "r11map"
+              mapIndex: 0
+              playerScores:
+                - playerId: "j97player"
+                  score: { Win: 7, Elims: 6 }
+                  agent: Ghost
+                - discordId: "123456789012345678"
+                  score: { Elims: 2 }
+      responses:
+        "200":
+          description: All scores for the map after the update
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LobbyScoresResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { $ref: "#/components/responses/KeyNotConfigured" }
@@ -719,6 +844,195 @@ components:
           description: Full list of player IDs in the lobby after the change.
           items: { $ref: "#/components/schemas/ResourceId" }
           example: ["j97player", "j98player"]
+
+    LobbyPlayersResponse:
+      type: object
+      additionalProperties: false
+      required: [players]
+      properties:
+        players:
+          type: array
+          maxItems: 12
+          description: Players in the lobby, in roster order.
+          items: { $ref: "#/components/schemas/Player" }
+      example:
+        players:
+          - { id: "j97player", name: "1stGlitch", discordId: "123456789012345678" }
+          - { id: "j98player", name: "A penguin", discordId: null }
+
+    LineupMap:
+      type: object
+      additionalProperties: false
+      required: [id, name, mapIndex]
+      properties:
+        id: { $ref: "#/components/schemas/ResourceId" }
+        name:
+          type: string
+          example: Fragrant Shore (Day)
+        mapIndex:
+          type: integer
+          minimum: 0
+          description: >
+            0-based position in the lineup. The same map can appear more than
+            once, so scores are keyed by `mapId` + `mapIndex`.
+          example: 0
+
+    LobbyMapLineupResponse:
+      type: object
+      additionalProperties: false
+      required: [mapLineup]
+      properties:
+        mapLineup:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [id, name, maps]
+          description: The scrim's map lineup, or `null` when none is attached.
+          properties:
+            id: { $ref: "#/components/schemas/ResourceId" }
+            name:
+              type: string
+              example: FSD > SE > HSD > SR > DS > FSN
+            maps:
+              type: array
+              items: { $ref: "#/components/schemas/LineupMap" }
+      example:
+        mapLineup:
+          id: "n34lineup"
+          name: FSD > SE > HSD
+          maps:
+            - { id: "r11map", name: Fragrant Shore (Day), mapIndex: 0 }
+            - { id: "r12map", name: Sound Eclipse, mapIndex: 1 }
+            - { id: "r13map", name: Hard Sell (Day), mapIndex: 2 }
+
+    ScoreFields:
+      type: object
+      description: >
+        Points per scoring field, keyed by the field names of the scrim's
+        point system (e.g. `Win`, `Elims`), matched exactly including case
+        and spaces. Values are points, not counts: 3 elims worth 2 points
+        each is `6`. The sum of all values is the player's map score used
+        for placement. Unknown keys are stored and still count toward the
+        sum.
+      additionalProperties: { type: number }
+      example: { Win: 7, Elims: 6 }
+
+    UpdateLobbyScoresRequest:
+      type: object
+      additionalProperties: false
+      required: [mapId, mapIndex, playerScores]
+      properties:
+        mapId:
+          type: string
+          minLength: 1
+          description: Map ID from `GET /api/lobbies/{lobbyId}/map-lineup`.
+          example: "r11map"
+        mapIndex:
+          type: integer
+          minimum: 0
+          description: 0-based position of the map in the lineup.
+          example: 0
+        playerScores:
+          type: array
+          description: >
+            One entry per player to update. Each player may appear only once.
+            An empty array just recalculates the map.
+          items:
+            type: object
+            additionalProperties: false
+            description: Provide exactly one of `playerId` or `discordId`.
+            oneOf:
+              - required: [playerId]
+              - required: [discordId]
+            required: [score]
+            properties:
+              playerId:
+                type: string
+                minLength: 1
+                description: Player ID from `GET /api/lobbies/{lobbyId}/players`.
+                example: "j97player"
+              discordId:
+                type: string
+                minLength: 1
+                description: Linked Discord user ID of the player.
+                example: "123456789012345678"
+              score: { $ref: "#/components/schemas/ScoreFields" }
+              agent:
+                type: string
+                description: Optional agent the player used on this map.
+                example: Ghost
+
+    LobbyScore:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mapId
+        - mapIndex
+        - playerId
+        - playerName
+        - discordId
+        - score
+        - calculatedPlacementPoints
+        - isMapWinner
+        - agent
+        - updatedAt
+      description: One player's stored score for one map.
+      properties:
+        id: { $ref: "#/components/schemas/ResourceId" }
+        mapId: { $ref: "#/components/schemas/ResourceId" }
+        mapIndex:
+          type: integer
+          minimum: 0
+          example: 0
+        playerId: { $ref: "#/components/schemas/ResourceId" }
+        playerName:
+          type: string
+          nullable: true
+          description: "`null` if the player no longer exists."
+          example: 1stGlitch
+        discordId:
+          type: string
+          nullable: true
+          example: "123456789012345678"
+        score: { $ref: "#/components/schemas/ScoreFields" }
+        calculatedPlacementPoints:
+          type: number
+          description: >
+            Placement points from the point system plus any EPP bonus. `0`
+            when the point system has no placement points.
+          example: 3
+        isMapWinner:
+          type: boolean
+          example: true
+        agent:
+          type: string
+          nullable: true
+          example: Ghost
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+
+    LobbyScoresResponse:
+      type: object
+      additionalProperties: false
+      required: [scores]
+      properties:
+        scores:
+          type: array
+          description: Scores sorted by `mapIndex`.
+          items: { $ref: "#/components/schemas/LobbyScore" }
+      example:
+        scores:
+          - id: "s01score"
+            mapId: "r11map"
+            mapIndex: 0
+            playerId: "j97player"
+            playerName: 1stGlitch
+            discordId: "123456789012345678"
+            score: { Win: 7, Elims: 6 }
+            calculatedPlacementPoints: 3
+            isMapWinner: true
+            agent: Ghost
+            updatedAt: 1787068800000
 
     Deleted:
       type: object
