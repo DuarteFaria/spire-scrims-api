@@ -3,7 +3,7 @@ info:
   title: Spire Scrims REST API
   version: 1.0.0
   description: |
-    HTTP API for external tools to manage scrims, lobbies, lobby players, and lobby scores.
+    HTTP API for external tools to manage scrims, lobbies, lobby players, lobby scores, and point systems.
 
     ## Authentication
     Every request needs a bearer token: `Authorization: Bearer <api-key>`.
@@ -30,10 +30,12 @@ info:
     ## Scoring a lobby
     1. `GET /api/lobbies/{lobbyId}/map-lineup` — get each map's `id` and
        `mapIndex` for the lobby's scrim
-    2. `GET /api/lobbies/{lobbyId}/players` — the players you can score
-    3. `PUT /api/lobbies/{lobbyId}/scores` — submit scores for one map
+    2. `GET /api/lobbies/{lobbyId}/point-system` — the scoring field names
+       and values to use as `score` keys
+    3. `GET /api/lobbies/{lobbyId}/players` — the players you can score
+    4. `PUT /api/lobbies/{lobbyId}/scores` — submit scores for one map
        (`mapId` + `mapIndex`); repeat per map
-    4. `GET /api/lobbies/{lobbyId}/scores` — read back stored scores,
+    5. `GET /api/lobbies/{lobbyId}/scores` — read back stored scores,
        placement points and map winners
 servers:
   - url: /
@@ -122,7 +124,9 @@ paths:
     get:
       tags: [Lookups]
       summary: List point systems
-      description: Point systems that can be attached to a scrim at creation via `pointSystemId`.
+      description: >
+        Point systems, with their scoring rules, that can be attached to a
+        scrim at creation via `pointSystemId`.
       operationId: listPointSystems
       responses:
         "200":
@@ -367,6 +371,28 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LobbyMapLineupResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/KeyNotConfigured" }
+
+  /api/lobbies/{lobbyId}/point-system:
+    get:
+      tags: [Scores]
+      summary: Get a lobby's point system
+      description: >
+        The point system attached to the lobby's scrim. Its `fields` names are
+        the keys to use in `score` when submitting scores. `pointSystem` is
+        `null` when the scrim has no point system attached.
+      operationId: getLobbyPointSystem
+      parameters:
+        - $ref: "#/components/parameters/lobbyId"
+      responses:
+        "200":
+          description: The lobby's point system
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LobbyPointSystemResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -756,6 +782,87 @@ components:
         players:
           - { id: "j97player", name: "1stGlitch", discordId: "123456789012345678" }
 
+    PointSystemRules:
+      type: object
+      additionalProperties: false
+      required: [fields]
+      properties:
+        fields:
+          type: array
+          description: Scoring fields. Their names are the keys of `score` in lobby scores.
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, value]
+            properties:
+              name:
+                type: string
+                example: Elims
+              value:
+                type: number
+                description: Points per unit (or per check, for `checkbox` fields).
+                example: 2
+              type:
+                type: string
+                enum: [number, checkbox]
+        placementPoints:
+          type: object
+          additionalProperties: false
+          required: [enabled, points]
+          properties:
+            enabled: { type: boolean }
+            points:
+              type: array
+              description: Points by placement, first place first.
+              items: { type: number }
+              example: [3, 2, 1]
+            minMatchPoints: { type: number }
+        bonusPoints:
+          type: object
+          additionalProperties: false
+          required: [enabled, bonuses]
+          properties:
+            enabled: { type: boolean }
+            bonuses:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [name, fields, value]
+                properties:
+                  name: { type: string }
+                  fields:
+                    type: array
+                    items: { type: string }
+                  value: { type: number }
+        exquisitePerformancePoints:
+          type: object
+          additionalProperties: false
+          required:
+            [enabled, missionPointFields, extractionFields, pointDifferenceThreshold, bonusValue]
+          description: EPP bonus settings.
+          properties:
+            enabled: { type: boolean }
+            missionPointFields:
+              type: array
+              items: { type: string }
+            extractionFields:
+              type: array
+              items: { type: string }
+            pointDifferenceThreshold: { type: number }
+            bonusValue: { type: number }
+
+    PointSystem:
+      type: object
+      additionalProperties: false
+      required: [id, name, pointSystem]
+      properties:
+        id: { $ref: "#/components/schemas/ResourceId" }
+        name:
+          type: string
+          example: Points 4.0 (Newest)
+        pointSystem: { $ref: "#/components/schemas/PointSystemRules" }
+
     PointSystemsResponse:
       type: object
       additionalProperties: false
@@ -763,9 +870,43 @@ components:
       properties:
         pointSystems:
           type: array
-          items: { $ref: "#/components/schemas/NamedResource" }
+          items: { $ref: "#/components/schemas/PointSystem" }
       example:
-        pointSystems: [{ id: "m12points", name: "Points 4.0 (Newest)" }]
+        pointSystems:
+          - id: "m12points"
+            name: Points 4.0 (Newest)
+            pointSystem:
+              fields:
+                - { name: Win, value: 7, type: checkbox }
+                - { name: Elims, value: 2, type: number }
+              placementPoints: { enabled: true, points: [3, 2, 1] }
+
+    LobbyPointSystemResponse:
+      type: object
+      additionalProperties: false
+      required: [pointSystem]
+      properties:
+        pointSystem:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [id, name, pointSystem]
+          description: The scrim's point system, or `null` when none is attached.
+          properties:
+            id: { $ref: "#/components/schemas/ResourceId" }
+            name:
+              type: string
+              example: Points 4.0 (Newest)
+            pointSystem: { $ref: "#/components/schemas/PointSystemRules" }
+      example:
+        pointSystem:
+          id: "m12points"
+          name: Points 4.0 (Newest)
+          pointSystem:
+            fields:
+              - { name: Win, value: 7, type: checkbox }
+              - { name: Elims, value: 2, type: number }
+            placementPoints: { enabled: true, points: [3, 2, 1] }
 
     MapLineupsResponse:
       type: object

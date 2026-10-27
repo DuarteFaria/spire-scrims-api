@@ -1,6 +1,6 @@
 # Spire Scrims API
 
-A small REST API for managing scrims, lobbies, lobby players, and lobby scores. It includes
+A small REST API for managing scrims, lobbies, lobby players, lobby scores, and point systems. It includes
 interactive Swagger docs so you can inspect the endpoints and try requests from
 your browser.
 
