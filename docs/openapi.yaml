@@ -438,7 +438,8 @@ paths:
         Upserts scores for one map (`mapId` + `mapIndex`) of the lobby. Only
         the players you send are changed; other players' stored scores for
         that map are kept. A player's `score` object is replaced as a whole,
-        not merged field by field.
+        not merged field by field. `loadout` is also replaced as a whole when
+        sent; leaving it out keeps the stored loadout.
 
 
         After saving, placement points, EPP bonuses and the map winner are
@@ -461,6 +462,12 @@ paths:
                 - playerId: "j97player"
                   score: { Win: 7, Elims: 6 }
                   agent: Ghost
+                  loadout:
+                    weapon: Hornet
+                    expertise: Long Shot
+                    passive: Lucky Dodge
+                    gadget1: Spyglass
+                    gadget2: Gas Grenade
                 - discordId: "123456789012345678"
                   score: { Elims: 2 }
       responses:
@@ -1058,6 +1065,18 @@ components:
       additionalProperties: { type: number }
       example: { Win: 7, Elims: 6 }
 
+    Loadout:
+      type: object
+      additionalProperties: false
+      description: Loadout a player used on one map.
+      required: [weapon, expertise, passive, gadget1, gadget2]
+      properties:
+        weapon: { type: string, example: Hornet }
+        expertise: { type: string, example: Long Shot }
+        passive: { type: string, example: Lucky Dodge }
+        gadget1: { type: string, example: Spyglass }
+        gadget2: { type: string, example: Gas Grenade }
+
     UpdateLobbyScoresRequest:
       type: object
       additionalProperties: false
@@ -1102,6 +1121,11 @@ components:
                 type: string
                 description: Optional agent the player used on this map.
                 example: Ghost
+              loadout:
+                allOf: [{ $ref: "#/components/schemas/Loadout" }]
+                description: >
+                  Optional loadout the player used on this map. Omit it to keep
+                  the stored loadout.
 
     LobbyScore:
       type: object
@@ -1117,6 +1141,7 @@ components:
         - calculatedPlacementPoints
         - isMapWinner
         - agent
+        - loadout
         - updatedAt
       description: One player's stored score for one map.
       properties:
@@ -1150,6 +1175,11 @@ components:
           type: string
           nullable: true
           example: Ghost
+        loadout:
+          description: "`null` if no loadout was recorded."
+          oneOf:
+            - $ref: "#/components/schemas/Loadout"
+            - { type: object, nullable: true, enum: [null] }
         updatedAt: { $ref: "#/components/schemas/Timestamp" }
 
     LobbyScoresResponse:
@@ -1173,6 +1203,12 @@ components:
             calculatedPlacementPoints: 3
             isMapWinner: true
             agent: Ghost
+            loadout:
+              weapon: Hornet
+              expertise: Long Shot
+              passive: Lucky Dodge
+              gadget1: Spyglass
+              gadget2: Gas Grenade
             updatedAt: 1787068800000
 
     Deleted:
