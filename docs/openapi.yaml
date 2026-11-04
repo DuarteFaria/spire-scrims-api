@@ -439,7 +439,9 @@ paths:
         the players you send are changed; other players' stored scores for
         that map are kept. A player's `score` object is replaced as a whole,
         not merged field by field. `loadout` is also replaced as a whole when
-        sent; leaving it out keeps the stored loadout.
+        sent; leaving it out keeps the stored loadout. `eliminations` works
+        the same way: sending it replaces the stored list (`[]` clears it),
+        leaving it out keeps it.
 
 
         After saving, placement points, EPP bonuses and the map winner are
@@ -468,6 +470,9 @@ paths:
                     passive: Lucky Dodge
                     gadget1: Spyglass
                     gadget2: Gas Grenade
+                  eliminations:
+                    - discordId: "123456789012345678"
+                    - playerId: "k12player"
                 - discordId: "123456789012345678"
                   score: { Elims: 2 }
       responses:
@@ -1077,6 +1082,25 @@ components:
         gadget1: { type: string, example: Spyglass }
         gadget2: { type: string, example: Gas Grenade }
 
+    PlayerRef:
+      type: object
+      additionalProperties: false
+      description: Provide exactly one of `playerId` or `discordId`.
+      oneOf:
+        - required: [playerId]
+        - required: [discordId]
+      properties:
+        playerId:
+          type: string
+          minLength: 1
+          description: Player ID from `GET /api/lobbies/{lobbyId}/players`.
+          example: "k12player"
+        discordId:
+          type: string
+          minLength: 1
+          description: Linked Discord user ID of the player.
+          example: "123456789012345678"
+
     UpdateLobbyScoresRequest:
       type: object
       additionalProperties: false
@@ -1126,6 +1150,16 @@ components:
                 description: >
                   Optional loadout the player used on this map. Omit it to keep
                   the stored loadout.
+              eliminations:
+                type: array
+                items: { $ref: "#/components/schemas/PlayerRef" }
+                description: >
+                  Optional list of players this player eliminated on this map.
+                  Each must be in the lobby and cannot be the player
+                  themselves. The same player may appear more than once (e.g.
+                  eliminated again after a revive). Not checked against the
+                  `score` points. Omit it to keep the stored list; `[]` clears
+                  it.
 
     LobbyScore:
       type: object
@@ -1142,6 +1176,7 @@ components:
         - isMapWinner
         - agent
         - loadout
+        - eliminations
         - updatedAt
       description: One player's stored score for one map.
       properties:
@@ -1180,6 +1215,14 @@ components:
           oneOf:
             - $ref: "#/components/schemas/Loadout"
             - { type: object, nullable: true, enum: [null] }
+        eliminations:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/ResourceId" }
+          description: >
+            Player IDs this player eliminated on this map, in the order sent.
+            `null` if never recorded.
+          example: ["k12player"]
         updatedAt: { $ref: "#/components/schemas/Timestamp" }
 
     LobbyScoresResponse:
@@ -1209,6 +1252,7 @@ components:
               passive: Lucky Dodge
               gadget1: Spyglass
               gadget2: Gas Grenade
+            eliminations: ["k12player"]
             updatedAt: 1787068800000
 
     Deleted:
